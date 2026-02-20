@@ -5,16 +5,16 @@
 #
 
 import argparse
-import asyncio
-import json
 import sys
+import os
+
+import httpx
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCPatchRequest,
@@ -33,86 +33,56 @@ app = FastAPI()
 small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler()
 
 
-# -----------------------------
-# Minimal server-owned event hub
-# -----------------------------
-class EventHub:
-    def __init__(self):
-        self.subs: List[asyncio.Queue] = []
-        self.last_status: Dict[str, Any] = {
-            "phase": "idle",
-            "services": {"llm": None, "stt": None, "tts": None},
-            "transcript": [],
-        }
 
-    async def publish(self, evt: Dict[str, Any]) -> None:
-        # Update snapshot for /api/status (best-effort)
-        t = evt.get("type")
-        if t == "phase":
-            self.last_status["phase"] = evt.get("phase", self.last_status["phase"])
-        elif t == "health":
-            self.last_status["services"] = evt.get("services", self.last_status["services"])
-        elif t == "transcript":
-            # keep last 200 lines
-            self.last_status["transcript"].append(evt.get("line", ""))
-            self.last_status["transcript"] = [x for x in self.last_status["transcript"] if x][-200:]
-
-        dead = []
-        for q in self.subs:
-            try:
-                q.put_nowait(evt)
-            except Exception:
-                dead.append(q)
-        if dead:
-            self.subs = [q for q in self.subs if q not in dead]
+def _clean_env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip().strip('"').strip("'")
 
 
-app.state.hub = EventHub()
+SERVICE_URLS = {
+    "llm": _clean_env("LLM_BASE_URL", ""),
+    "stt": _clean_env("STT_BASE_URL", ""),
+    "tts": _clean_env("TTS_BASE_URL", ""),
+}
 
 
-@app.get("/api/status")
-async def api_status():
-    # Snapshot for UI on load/reconnect
-    return JSONResponse(app.state.hub.last_status)
+async def _probe_service(client: httpx.AsyncClient, base_url: str) -> str:
+    if not base_url:
+        return "unknown"
 
-
-@app.get("/api/events")
-async def api_events():
-    """
-    Server-Sent Events stream.
-    Bot can publish to app.state.hub.publish(...) if you wire it in later.
-    """
-    hub: EventHub = app.state.hub
-    q: asyncio.Queue = asyncio.Queue(maxsize=200)
-    hub.subs.append(q)
-
-    async def gen():
-        # initial snapshot
-        yield f"data: {json.dumps({'type':'init', **hub.last_status}, ensure_ascii=False)}\n\n"
+    targets = [base_url.rstrip("/") + "/models", base_url.rstrip("/")]
+    for url in targets:
         try:
-            while True:
-                evt = await q.get()
-                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
-        finally:
-            try:
-                hub.subs.remove(q)
-            except ValueError:
-                pass
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+            r = await client.get(url)
+            if r.status_code < 500:
+                return "ok"
+        except Exception:
+            continue
+    return "down"
 
 
-# -----------------------------
-# WebRTC endpoints (unchanged)
-# -----------------------------
+
+@app.get("/api/health")
+async def api_health():
+    async with httpx.AsyncClient(timeout=httpx.Timeout(2.5)) as client:
+        llm = await _probe_service(client, SERVICE_URLS["llm"])
+        stt = await _probe_service(client, SERVICE_URLS["stt"])
+        tts = await _probe_service(client, SERVICE_URLS["tts"])
+
+    return JSONResponse({
+        "health": {"llm": llm, "stt": stt, "tts": tts},
+        "services": SERVICE_URLS,
+    })
+
+
 @app.post("/api/offer")
 async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
     """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
+    # Prepare runner arguments with the callback to run your bot
     async def webrtc_connection_callback(connection):
-        # ✅ KEEP EXACTLY AS BEFORE so we don't break anything:
         background_tasks.add_task(run_bot, connection)
 
+    # Delegate handling to SmallWebRTCRequestHandler
     answer = await small_webrtc_handler.handle_web_request(
         request=request,
         webrtc_connection_callback=webrtc_connection_callback,
@@ -139,9 +109,13 @@ async def lifespan(app: FastAPI):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WebRTC demo (plus minimal SSE/status)")
-    parser.add_argument("--host", default="localhost", help="Host for HTTP server (default: localhost)")
-    parser.add_argument("--port", type=int, default=7860, help="Port for HTTP server (default: 7860)")
+    parser = argparse.ArgumentParser(description="WebRTC demo")
+    parser.add_argument(
+        "--host", default="localhost", help="Host for HTTP server (default: localhost)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=7860, help="Port for HTTP server (default: 7860)"
+    )
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
