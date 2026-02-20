@@ -279,8 +279,7 @@
           </div>
           <div class="bd">
             <div class="row" style="margin-bottom:10px;">
-              <button id="connect-btn" class="primary">Connect</button>
-              <button id="disconnect-btn" class="danger" disabled>Disconnect</button>
+              <button id="connect-toggle" class="primary">Connect</button>
             </div>
 
             <div class="row" style="justify-content: space-between; margin-bottom: 10px;">
@@ -424,8 +423,9 @@
       lastEvent: el("last-event"),
     };
 
-    const connectBtn = el("connect-btn");
-    const disconnectBtn = el("disconnect-btn");
+    const connectToggleBtn = el("connect-toggle");
+    const legacyConnectBtn = el("connect-btn");
+    const legacyDisconnectBtn = el("disconnect-btn");
     const clearChatBtn = el("clear-chat");
     const autoReconnectEl = el("auto-reconnect");
     const useDataChannelEl = el("use-datachannel");
@@ -633,6 +633,15 @@
       } catch {}
     }
 
+    function eventText(evt) {
+      if (!evt) return "";
+      if (typeof evt.text === "string" && evt.text.trim()) return evt.text.trim();
+      if (evt.data && typeof evt.data.text === "string" && evt.data.text.trim()) return evt.data.text.trim();
+      if (evt.data && typeof evt.data.content === "string" && evt.data.content.trim()) return evt.data.content.trim();
+      if (typeof evt.content === "string" && evt.content.trim()) return evt.content.trim();
+      return "";
+    }
+
     function handleServerEvent(evt) {
       // Expected examples:
       // {type:"user", text:"..."}  (final transcript)
@@ -642,10 +651,13 @@
       // {type:"log", text:"..."} (optional)
       if (!evt || !evt.type) return;
 
-      if (evt.type === "user" && evt.text) {
-        appendMessage("user", evt.text);
-      } else if (evt.type === "assistant" && evt.text) {
-        appendMessage("assistant", evt.text);
+      const type = String(evt.type || "").toLowerCase();
+      const text = eventText(evt);
+
+      if ((type === "user" || type.includes("transcription") || type.includes("stt")) && text) {
+        appendMessage("user", text);
+      } else if ((type === "assistant" || type.includes("llm") || type.includes("assistant_text")) && text) {
+        appendMessage("assistant", text);
       } else if (evt.type === "log" && evt.text) {
         log("server:", evt.text);
       } else if (evt.type === "status") {
@@ -832,19 +844,39 @@
       onDisconnected(false);
     }
 
+    function getConnectControl() {
+      return connectToggleBtn || legacyConnectBtn;
+    }
+
+    function refreshConnectButton() {
+      const btn = getConnectControl();
+      if (!btn) return;
+
+      // If older markup is present, hide old dedicated disconnect control.
+      if (legacyDisconnectBtn) legacyDisconnectBtn.style.display = "none";
+
+      if (connected) {
+        btn.textContent = "Disconnect";
+        btn.classList.remove("primary");
+        btn.classList.add("danger");
+      } else {
+        btn.textContent = "Connect";
+        btn.classList.remove("danger");
+        btn.classList.add("primary");
+      }
+    }
+
     function onConnecting() {
       setStatusChip(status.webrtcDot, status.webrtcState, "warn", "Connecting");
       connected = true;
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
+      refreshConnectButton();
     }
 
     function onConnected() {
       printSelectedIceCandidate(peerConnection);
       setStatusChip(status.webrtcDot, status.webrtcState, "good", "Connected");
       connected = true;
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
+      refreshConnectButton();
 
       // Mark events as waiting if enabled but not open yet
       if (useDataChannelEl.checked && (!dataChannel || dataChannel.readyState !== "open")) {
@@ -855,8 +887,7 @@
     function onDisconnected(maybeReconnect) {
       setStatusChip(status.webrtcDot, status.webrtcState, "bad", "Disconnected");
       connected = false;
-      connectBtn.disabled = false;
-      disconnectBtn.disabled = true;
+      refreshConnectButton();
 
       if (maybeReconnect && autoReconnectEl.checked) {
         log("Auto-reconnect scheduled…");
@@ -927,13 +958,15 @@
     // =========================
     // UI wiring
     // =========================
-    connectBtn.addEventListener("click", async () => {
+    getConnectControl()?.addEventListener("click", async () => {
+      if (connected) {
+        disconnect();
+        return;
+      }
       try { await connect(); }
       catch {}
     });
-
-    disconnectBtn.addEventListener("click", () => disconnect());
-
+    legacyDisconnectBtn?.addEventListener("click", () => disconnect());
     clearChatBtn.addEventListener("click", () => {
       chatEl.innerHTML = "";
       status.lastEvent.textContent = "—";
@@ -941,6 +974,7 @@
 
     // Initial state
     setStatusChip(status.webrtcDot, status.webrtcState, null, "Disconnected");
+    refreshConnectButton();
     setStatusChip(status.iceDot, status.iceState, null, "ICE: —");
     setStatusChip(status.eventsDot, status.eventsState, null, "Idle");
     applyServiceState("llm", "unknown");
