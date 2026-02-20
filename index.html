@@ -453,6 +453,7 @@
 
     let dataChannel = null;
     let sse = null;
+    let lastTranscriptMessage = null;
 
     // =========================
     // Helpers
@@ -642,6 +643,59 @@
       return "";
     }
 
+    function eventBool(evt, ...paths) {
+      for (const path of paths) {
+        let cur = evt;
+        for (const key of path) {
+          if (!cur || typeof cur !== "object" || !(key in cur)) {
+            cur = undefined;
+            break;
+          }
+          cur = cur[key];
+        }
+        if (typeof cur === "boolean") return cur;
+      }
+      return null;
+    }
+
+    function classifyTranscriptEvent(evt) {
+      const type = String(evt?.type || "").toLowerCase();
+      const label = String(evt?.label || evt?.data?.label || "").toLowerCase();
+      const role = String(evt?.role || evt?.data?.role || evt?.speaker || "").toLowerCase();
+
+      if (role === "user" || role === "assistant") return role;
+      if (label === "assistant.tts_text") return "assistant";
+
+      if (type === "assistant" || type === "assistant_text") return "assistant";
+      if (type === "user" || type === "user_text") return "user";
+
+      if (type.includes("llm") || type.includes("tts") || type.includes("metrics") || type.includes("started") || type.includes("stopped")) {
+        return null;
+      }
+
+      if (type.includes("stt") || type.includes("transcription") || type.includes("transcript")) {
+        const isPartial = type.includes("partial") || type.includes("interim");
+        const isFinal = eventBool(evt, ["final"], ["is_final"], ["data", "final"], ["data", "is_final"]);
+        if (isPartial || isFinal === false) return null;
+        return "user";
+      }
+
+      return null;
+    }
+
+    function appendTranscriptEvent(evt) {
+      const role = classifyTranscriptEvent(evt);
+      const text = eventText(evt);
+      if (!role || !text) return false;
+
+      const fingerprint = `${role}:${text}`;
+      if (lastTranscriptMessage === fingerprint) return true;
+
+      appendMessage(role, text);
+      lastTranscriptMessage = fingerprint;
+      return true;
+    }
+
     function handleServerEvent(evt) {
       // Expected examples:
       // {type:"user", text:"..."}  (final transcript)
@@ -651,14 +705,11 @@
       // {type:"log", text:"..."} (optional)
       if (!evt || !evt.type) return;
 
-      const type = String(evt.type || "").toLowerCase();
-      const text = eventText(evt);
+      if (appendTranscriptEvent(evt)) {
+        return;
+      }
 
-      if ((type === "user" || type.includes("transcription") || type.includes("stt")) && text) {
-        appendMessage("user", text);
-      } else if ((type === "assistant" || type.includes("llm") || type.includes("assistant_text")) && text) {
-        appendMessage("assistant", text);
-      } else if (evt.type === "log" && evt.text) {
+      if (evt.type === "log" && evt.text) {
         log("server:", evt.text);
       } else if (evt.type === "status") {
         // Optional: server-driven status overrides
@@ -969,6 +1020,7 @@
     legacyDisconnectBtn?.addEventListener("click", () => disconnect());
     clearChatBtn.addEventListener("click", () => {
       chatEl.innerHTML = "";
+      lastTranscriptMessage = null;
       status.lastEvent.textContent = "—";
     });
 
