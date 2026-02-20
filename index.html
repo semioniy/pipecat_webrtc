@@ -5,1022 +5,473 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Local WebRTC Voice Agent</title>
   <style>
-    :root {
-      --bg: #0b0f17;
-      --panel: #111827;
-      --panel2: #0f172a;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --border: rgba(255,255,255,0.08);
-      --good: #10b981;
-      --warn: #f59e0b;
-      --bad:  #ef4444;
-      --chip: rgba(255,255,255,0.06);
-      --shadow: 0 10px 25px rgba(0,0,0,0.35);
-      --radius: 16px;
+    :root{
+      --bg:#0b0f17; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af;
+      --border:rgba(255,255,255,.10);
+      --ok:#10b981; --warn:#f59e0b; --down:#ef4444; --unk:#6b7280;
+      --chip:rgba(255,255,255,.06);
+      --radius:14px;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     }
-
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: var(--sans);
-      background: radial-gradient(1200px 700px at 20% 0%, rgba(59,130,246,0.18), transparent 60%),
-                  radial-gradient(900px 500px at 100% 30%, rgba(16,185,129,0.16), transparent 55%),
-                  var(--bg);
-      color: var(--text);
+    *{box-sizing:border-box}
+    body{margin:0; font-family:var(--sans); background:var(--bg); color:var(--text)}
+    .wrap{max-width:1100px; margin:24px auto; padding:0 16px}
+    .row{display:flex; gap:14px; flex-wrap:wrap}
+    .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:14px; flex:1; min-width:280px}
+    h1{margin:0 0 6px 0; font-size:20px}
+    .muted{color:var(--muted)}
+    .chips{display:flex; gap:8px; flex-wrap:wrap}
+    .chip{display:inline-flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--border); border-radius:999px; background:var(--chip); font-family:var(--mono); font-size:12px}
+    .dot{width:10px; height:10px; border-radius:50%}
+    .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.down{background:var(--down)} .dot.unk{background:var(--unk)}
+    button{cursor:pointer; border:1px solid var(--border); background:rgba(255,255,255,.06); color:var(--text); padding:10px 12px; border-radius:10px; font-weight:600}
+    button.primary{background:rgba(59,130,246,.20); border-color:rgba(59,130,246,.35)}
+    button.danger{background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.32)}
+    .btns{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .meter{height:10px; width:220px; background:rgba(255,255,255,.08); border:1px solid var(--border); border-radius:999px; overflow:hidden}
+    .meter > div{height:100%; width:0%}
+    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+    label{display:block; font-size:12px; color:var(--muted); margin:6px 0 4px}
+    input, textarea{
+      width:100%; padding:9px 10px; border-radius:10px; border:1px solid var(--border);
+      background:rgba(0,0,0,.22); color:var(--text); font-family:var(--mono); font-size:12px
     }
-
-    .wrap {
-      max-width: 1150px;
-      margin: 28px auto;
-      padding: 0 16px 28px;
-    }
-
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    h1 {
-      margin: 0 0 6px 0;
-      font-size: 22px;
-      letter-spacing: 0.2px;
-    }
-    .subtitle {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.3;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 360px 1fr;
-      gap: 16px;
-      align-items: start;
-    }
-
-    .card {
-      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    .card .hd {
-      padding: 14px 14px 10px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      background: rgba(255,255,255,0.02);
-    }
-
-    .card .hd h2 {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 650;
-      color: #f3f4f6;
-      letter-spacing: 0.2px;
-    }
-
-    .card .bd { padding: 14px; }
-
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .col { display: flex; flex-direction: column; gap: 10px; }
-
-    button {
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.06);
-      color: var(--text);
-      padding: 10px 12px;
-      border-radius: 12px;
-      cursor: pointer;
-      font-weight: 650;
-      transition: transform 0.04s ease, background 0.1s ease;
-    }
-    button:hover { background: rgba(255,255,255,0.09); }
-    button:active { transform: translateY(1px); }
-    button.primary {
-      background: rgba(59,130,246,0.28);
-      border-color: rgba(59,130,246,0.45);
-    }
-    button.primary:hover { background: rgba(59,130,246,0.35); }
-    button.danger {
-      background: rgba(239,68,68,0.22);
-      border-color: rgba(239,68,68,0.40);
-    }
-    button.danger:hover { background: rgba(239,68,68,0.30); }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      background: var(--chip);
-      border: 1px solid var(--border);
-      font-size: 12px;
-      color: var(--muted);
-      user-select: none;
-    }
-
-    .dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--muted);
-      box-shadow: 0 0 0 2px rgba(0,0,0,0.25) inset;
-    }
-    .dot.good { background: var(--good); }
-    .dot.warn { background: var(--warn); }
-    .dot.bad  { background: var(--bad); }
-    .label-strong { color: #f3f4f6; }
-
-    .kv {
-      display: grid;
-      grid-template-columns: 92px 1fr;
-      gap: 10px;
-      align-items: center;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .kv .k { font-family: var(--mono); opacity: 0.85; }
-    .kv .v { color: #d1d5db; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-    .meter {
-      width: 100%;
-      height: 10px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border);
-      overflow: hidden;
-    }
-    .meter > div {
-      height: 100%;
-      width: 0%;
-      background: rgba(16,185,129,0.7);
-      transition: width 0.05s linear;
-    }
-
-    .chat {
-      height: 520px;
-      overflow: auto;
-      padding: 14px;
-      background: rgba(0,0,0,0.18);
-    }
-
-    .msg {
-      display: grid;
-      grid-template-columns: 38px 1fr;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .avatar {
-      width: 38px; height: 38px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border);
-      display: grid;
-      place-items: center;
-      font-weight: 800;
-      color: #e5e7eb;
-      user-select: none;
-    }
-    .bubble {
-      padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.04);
-      line-height: 1.35;
-      font-size: 13px;
-      color: #e5e7eb;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .meta {
-      margin-top: 6px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .msg.user .avatar { background: rgba(59,130,246,0.20); border-color: rgba(59,130,246,0.28); }
-    .msg.user .bubble { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.20); }
-    .msg.asst .avatar { background: rgba(16,185,129,0.18); border-color: rgba(16,185,129,0.26); }
-    .msg.asst .bubble { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.18); }
-
-    .log {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: #cbd5e1;
-      background: rgba(0,0,0,0.25);
-      border-top: 1px solid var(--border);
-      padding: 10px 12px;
-      max-height: 180px;
-      overflow: auto;
-      white-space: pre-wrap;
-    }
-
-    .footerbar {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 14px;
-      border-top: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-    }
-
-    input[type="checkbox"] { transform: translateY(1px); }
-
-    audio { width: 0; height: 0; opacity: 0; }
-    .muted { color: var(--muted); }
+    textarea{min-height:72px; resize:vertical; font-family:var(--sans); font-size:13px}
+    .log{height:360px; overflow:auto; padding:10px; border-radius:10px; border:1px solid var(--border); background:rgba(0,0,0,.22)}
+    .line{margin:0; white-space:pre-wrap; font-family:var(--sans); font-size:14px; line-height:1.35}
+    .line .who{font-family:var(--mono); font-size:12px; opacity:.9}
+    .footer{margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    audio{width:100%}
+    @media (max-width: 900px){ .grid2{grid-template-columns:1fr} .meter{width:160px}}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <div>
+    <div class="row">
+      <div class="card" style="flex: 2; min-width: 360px">
         <h1>Local WebRTC Voice Agent</h1>
-        <p class="subtitle">
-          Pipecat SmallWebRTCTransport · Ollama GPT-OSS · Faster-Whisper STT · Chatterbox TTS
-        </p>
-      </div>
-      <div class="row">
-        <span class="chip" title="WebRTC connection state">
-          <span id="webrtc-dot" class="dot"></span>
-          <span class="label-strong">WebRTC:</span>
-          <span id="webrtc-state">Disconnected</span>
-        </span>
-        <span class="chip" title="Microphone status">
-          <span id="mic-dot" class="dot"></span>
-          <span class="label-strong">Mic:</span>
-          <span id="mic-state">Idle</span>
-        </span>
-      </div>
-    </header>
+        <div class="muted">Browser does WebRTC only. Server does health checks + transcript. No LAN scanning from this page.</div>
 
-    <div class="grid">
-      <!-- LEFT -->
-      <div class="col">
-        <div class="card">
-          <div class="hd">
-            <h2>Connection</h2>
-            <span class="chip" title="ICE / DTLS selected candidate info appears in console">
-              <span class="dot" id="ice-dot"></span>
-              <span id="ice-state">ICE: —</span>
-            </span>
-          </div>
-          <div class="bd">
-            <div class="row" style="margin-bottom:10px;">
-              <button id="connect-btn" class="primary">Connect</button>
-              <button id="disconnect-btn" class="danger" disabled>Disconnect</button>
-            </div>
+        <div style="height:10px"></div>
 
-            <div class="row" style="justify-content: space-between; margin-bottom: 10px;">
-              <span class="chip" title="Try to automatically reconnect when disconnected">
-                <input id="auto-reconnect" type="checkbox"/>
-                <label for="auto-reconnect">Auto-reconnect</label>
-              </span>
-              <span class="chip" title="When enabled, attempts to open a WebRTC data channel named 'events'">
-                <input id="use-datachannel" type="checkbox" checked/>
-                <label for="use-datachannel">DataChannel</label>
-              </span>
-            </div>
-
-            <div class="kv" style="margin-top: 10px;">
-              <div class="k">Offer</div><div class="v" id="offer-url">/api/offer</div>
-              <div class="k">Audio out</div><div class="v muted">WebRTC remote track → &lt;audio autoplay&gt;</div>
-            </div>
-
-            <div style="margin-top: 14px;">
-              <div class="row" style="justify-content: space-between;">
-                <span class="muted" style="font-size: 12px;">Mic level</span>
-                <span class="muted" style="font-size: 12px;" id="mic-level-text">0%</span>
-              </div>
-              <div class="meter"><div id="mic-meter"></div></div>
-            </div>
-          </div>
-          <div class="log" id="log"></div>
+        <div class="chips">
+          <div class="chip"><span class="dot unk" id="dot-llm"></span>LLM: <span id="st-llm">unknown</span></div>
+          <div class="chip"><span class="dot unk" id="dot-stt"></span>STT: <span id="st-stt">unknown</span></div>
+          <div class="chip"><span class="dot unk" id="dot-tts"></span>TTS: <span id="st-tts">unknown</span></div>
+          <div class="chip">Phase: <span id="phase">idle</span></div>
+          <div class="chip">Sessions: <span id="sessions">0</span></div>
         </div>
 
-        <div class="card">
-          <div class="hd">
-            <h2>Services</h2>
-            <span class="chip" title="Health checks run every few seconds">
-              <span class="dot" id="health-dot"></span>
-              <span id="health-state">Polling</span>
-            </span>
-          </div>
-          <div class="bd">
-            <div class="row" style="gap: 8px; flex-wrap: wrap;">
-              <span class="chip" title="Ollama / OpenAI-compatible LLM base">
-                <span id="llm-dot" class="dot"></span>
-                <span class="label-strong">LLM</span>
-                <span id="llm-status">Unknown</span>
-              </span>
-              <span class="chip" title="Faster-Whisper / OpenAI-compatible STT base">
-                <span id="stt-dot" class="dot"></span>
-                <span class="label-strong">STT</span>
-                <span id="stt-status">Unknown</span>
-              </span>
-              <span class="chip" title="Chatterbox Turbo / OpenAI-compatible TTS base">
-                <span id="tts-dot" class="dot"></span>
-                <span class="label-strong">TTS</span>
-                <span id="tts-status">Unknown</span>
-              </span>
-            </div>
+        <div style="height:12px"></div>
 
-            <div class="kv" style="margin-top: 14px;">
-              <div class="k">LLM</div><div class="v" id="llm-url"></div>
-              <div class="k">STT</div><div class="v" id="stt-url"></div>
-              <div class="k">TTS</div><div class="v" id="tts-url"></div>
-            </div>
+        <div class="btns">
+          <button id="connect" class="primary">Connect</button>
+          <button id="disconnect" class="danger" disabled>Disconnect</button>
 
-            <p class="muted" style="margin: 12px 0 0; font-size: 12px; line-height: 1.35;">
-              If these show <b>CORS</b> or <b>Blocked</b>, it’s the browser refusing cross-origin requests.
-              In that case, expose a same-origin proxy endpoint (e.g. <span style="font-family:var(--mono)">/api/health/llm</span>)
-              on your Pipecat server.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- RIGHT -->
-      <div class="card">
-        <div class="hd">
-          <h2>Transcript</h2>
-          <div class="row">
-            <button id="clear-chat">Clear</button>
-            <span class="chip" title="Shows whether we are receiving transcript events from the server">
-              <span id="events-dot" class="dot"></span>
-              <span class="label-strong">Events</span>
-              <span id="events-state">Idle</span>
-            </span>
+          <span class="muted" style="margin-left:6px">Mic</span>
+          <div class="meter" title="Mic level (normalized)">
+            <div id="micbar"></div>
           </div>
         </div>
 
-        <div class="chat" id="chat"></div>
-
-        <div class="footerbar">
-          <div class="muted" style="font-size: 12px;">
-            Tip: have your server send JSON over DataChannel:
-            <span style="font-family:var(--mono)">{"type":"user","text":"..."} </span>
-            /
-            <span style="font-family:var(--mono)">{"type":"assistant","text":"..."}</span>
-          </div>
-          <div class="muted" style="font-size: 12px;" id="last-event">—</div>
-        </div>
-
+        <div style="height:10px"></div>
         <audio id="audio-el" autoplay></audio>
+
+        <div class="footer">
+          <button id="clear" title="Clear transcript on server">Clear transcript</button>
+          <span class="muted" id="sse">SSE: disconnected</span>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1; min-width: 320px">
+        <h1>Config</h1>
+        <div class="muted">Edits are stored on the server and applied on next reconnect.</div>
+
+        <div class="grid2">
+          <div>
+            <label>LLM base URL</label>
+            <input id="llm_base_url" placeholder="http://192.168.x.x:11434/v1" />
+          </div>
+          <div>
+            <label>LLM model</label>
+            <input id="llm_model" placeholder="gpt-oss:latest" />
+          </div>
+
+          <div>
+            <label>STT base URL</label>
+            <input id="stt_base_url" placeholder="http://192.168.x.x:8000/v1" />
+          </div>
+          <div>
+            <label>STT model</label>
+            <input id="stt_model" placeholder="Systran/faster-whisper-small" />
+          </div>
+
+          <div>
+            <label>TTS base URL</label>
+            <input id="tts_base_url" placeholder="http://192.168.x.x:8004/v1" />
+          </div>
+          <div>
+            <label>TTS voice</label>
+            <input id="tts_voice" placeholder="Frieren.wav" />
+          </div>
+
+          <div>
+            <label>TTS model</label>
+            <input id="tts_model" placeholder="gpt-4o-mini-tts" />
+          </div>
+          <div>
+            <label>Message stream filter</label>
+            <input id="accept_type" placeholder="bot-llm-text (env only)" disabled />
+          </div>
+        </div>
+
+        <label>System instruction (optional)</label>
+        <textarea id="system_instruction" placeholder="Leave empty to use .env default"></textarea>
+
+        <div style="height:10px"></div>
+        <div class="btns">
+          <button id="save">Save config</button>
+          <span class="muted" id="savehint"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <div class="card" style="flex: 1; min-width: 360px">
+        <h1>Transcript</h1>
+        <div class="muted">This is server-exported clean text (not raw JSON frames).</div>
+        <div style="height:10px"></div>
+        <div class="log" id="log"></div>
       </div>
     </div>
   </div>
 
-  <script>
-    // =========================
-    // Config
-    // =========================
-    // If your HTML is served from Pipecat, these are *cross-origin* to the browser:
-    // - likely to be blocked unless you set CORS headers on those services.
-    // If blocked, add same-origin proxy endpoints on Pipecat, then change these to "/api/health/llm" etc.
-    const LLM_BASE = "http://192.168.188.5:11434/v1";
-    const STT_BASE = "http://192.168.188.50:8000/v1";
-    const TTS_BASE = "http://192.168.188.50:8004/v1";
+<script>
+  // -----------------------------
+  // Helpers
+  // -----------------------------
+  const $ = (id) => document.getElementById(id);
 
-    // Best-effort health targets (will vary per service). We try a few.
-    const HEALTH_CHECKS = {
-      llm: [
-        () => fetchJson(`${LLM_BASE}/models`),              // OpenAI-compatible
-        () => fetchText("http://192.168.188.5:11434/api/tags"), // Ollama native (may be blocked too)
-      ],
-      stt: [
-        () => fetchJson(`${STT_BASE}/models`),
-      ],
-      tts: [
-        () => fetchJson(`${TTS_BASE}/models`),
-      ],
-    };
-
-    const HEALTH_INTERVAL_MS = 4000;
-
-    // Optional SSE endpoint if you add it later (disabled by default).
-    const ENABLE_SSE = false;
-    const SSE_URL = "/api/events";
-
-    // =========================
-    // Elements
-    // =========================
-    const status = {
-      webrtcDot: el("webrtc-dot"),
-      webrtcState: el("webrtc-state"),
-      micDot: el("mic-dot"),
-      micState: el("mic-state"),
-      iceDot: el("ice-dot"),
-      iceState: el("ice-state"),
-
-      llmDot: el("llm-dot"),
-      llmStatus: el("llm-status"),
-      sttDot: el("stt-dot"),
-      sttStatus: el("stt-status"),
-      ttsDot: el("tts-dot"),
-      ttsStatus: el("tts-status"),
-
-      healthDot: el("health-dot"),
-      healthState: el("health-state"),
-
-      eventsDot: el("events-dot"),
-      eventsState: el("events-state"),
-      lastEvent: el("last-event"),
-    };
-
-    const connectBtn = el("connect-btn");
-    const disconnectBtn = el("disconnect-btn");
-    const clearChatBtn = el("clear-chat");
-    const autoReconnectEl = el("auto-reconnect");
-    const useDataChannelEl = el("use-datachannel");
-
-    const audioEl = el("audio-el");
-    const chatEl = el("chat");
-    const logEl = el("log");
-
-    const micMeter = el("mic-meter");
-    const micLevelText = el("mic-level-text");
-
-    el("llm-url").textContent = LLM_BASE;
-    el("stt-url").textContent = STT_BASE;
-    el("tts-url").textContent = TTS_BASE;
-
-    // =========================
-    // State
-    // =========================
-    let connected = false;
-    let peerConnection = null;
-    let micStream = null;
-    let micAnalyser = null;
-    let micAudioCtx = null;
-    let micRAF = null;
-
-    let dataChannel = null;
-    let sse = null;
-
-    // =========================
-    // Helpers
-    // =========================
-    function el(id) { return document.getElementById(id); }
-
-    function log(...args) {
-      const msg = args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
-      const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-      logEl.textContent += line;
-      logEl.scrollTop = logEl.scrollHeight;
-      console.log(...args);
+  function dotClassFrom(status){
+    switch((status||"").toLowerCase()){
+      case "ok": return "ok";
+      case "degraded": return "warn";
+      case "down": return "down";
+      default: return "unk";
     }
+  }
 
-    function setDot(dotEl, state) {
-      dotEl.classList.remove("good","warn","bad");
-      if (state) dotEl.classList.add(state);
-    }
+  function setHealth(which, status){
+    $(`st-${which}`).textContent = status || "unknown";
+    const dot = $(`dot-${which}`);
+    dot.className = "dot " + dotClassFrom(status);
+  }
 
-    function setStatusChip(dotEl, textEl, state, text) {
-      setDot(dotEl, state);
-      textEl.textContent = text;
-    }
+  function appendLine(role, text){
+    const p = document.createElement("p");
+    p.className = "line";
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = role === "user" ? "User" : "Assistant";
+    p.appendChild(who);
+    p.appendChild(document.createTextNode(": " + text));
+    $("log").appendChild(p);
+    $("log").scrollTop = $("log").scrollHeight;
+  }
 
-    function appendMessage(role, text) {
-      const msg = document.createElement("div");
-      msg.className = `msg ${role === "user" ? "user" : "asst"}`;
+  // -----------------------------
+  // SSE events (server-owned status)
+  // -----------------------------
+  let evsrc = null;
 
-      const avatar = document.createElement("div");
-      avatar.className = "avatar";
-      avatar.textContent = role === "user" ? "U" : "A";
+  function startSSE(){
+    if(evsrc) return;
+    evsrc = new EventSource("/api/events");
+    $("sse").textContent = "SSE: connecting…";
 
-      const body = document.createElement("div");
+    evsrc.onopen = () => $("sse").textContent = "SSE: connected";
+    evsrc.onerror = () => $("sse").textContent = "SSE: disconnected";
 
-      const bubble = document.createElement("div");
-      bubble.className = "bubble";
-      bubble.textContent = text;
+    evsrc.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
 
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = `${role === "user" ? "User" : "Assistant"} · ${new Date().toLocaleTimeString()}`;
+      if(msg.type === "snapshot"){
+        const st = msg.status || {};
+        const health = st.health || {};
+        setHealth("llm", health.llm);
+        setHealth("stt", health.stt);
+        setHealth("tts", health.tts);
+        $("phase").textContent = (st.runtime && st.runtime.phase) || "idle";
+        $("sessions").textContent = st.active_sessions ?? "0";
 
-      body.appendChild(bubble);
-      body.appendChild(meta);
+        const cfg = st.config || {};
+        $("llm_base_url").value = cfg.llm_base_url || "";
+        $("llm_model").value = cfg.llm_model || "";
+        $("stt_base_url").value = cfg.stt_base_url || "";
+        $("stt_model").value = cfg.stt_model || "";
+        $("tts_base_url").value = cfg.tts_base_url || "";
+        $("tts_model").value = cfg.tts_model || "";
+        $("tts_voice").value = cfg.tts_voice || "";
+        $("system_instruction").value = cfg.system_instruction || "";
 
-      msg.appendChild(avatar);
-      msg.appendChild(body);
-
-      chatEl.appendChild(msg);
-      chatEl.scrollTop = chatEl.scrollHeight;
-    }
-
-    async function fetchJson(url) {
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    }
-
-    async function fetchText(url) {
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.text();
-    }
-
-    function classifyFetchError(err) {
-      const msg = (err && err.message) ? err.message : String(err);
-      // Browser often gives TypeError: Failed to fetch for CORS / DNS / refused.
-      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) return "CORS/blocked";
-      return msg;
-    }
-
-    // =========================
-    // ICE helpers (kept from your version)
-    // =========================
-    const printSelectedIceCandidate = async (pc) => {
-      try {
-        const stats = await pc.getStats(null);
-        stats.forEach(report => {
-          if (report.type === "transport" && report.selectedCandidatePairId) {
-            const candidatePair = stats.get(report.selectedCandidatePairId);
-            const localCandidate = stats.get(candidatePair.localCandidateId);
-            const remoteCandidate = stats.get(candidatePair.remoteCandidateId);
-            console.log("Selected local candidate:", localCandidate);
-            console.log("Selected remote candidate:", remoteCandidate);
-          }
+        $("log").innerHTML = "";
+        (msg.transcript || []).forEach(line => {
+          if(typeof line !== "string") return;
+          const m = line.match(/^(User|Assistant):\s*(.*)$/);
+          if(m) appendLine(m[1].toLowerCase() === "user" ? "user" : "assistant", m[2]);
         });
-      } catch (e) {
-        log("ICE stats error:", String(e));
+        return;
+      }
+
+      if(msg.type === "health"){
+        const health = msg.health || {};
+        setHealth("llm", health.llm);
+        setHealth("stt", health.stt);
+        setHealth("tts", health.tts);
+        return;
+      }
+
+      if(msg.type === "phase"){
+        $("phase").textContent = msg.phase || "idle";
+        return;
+      }
+
+      if(msg.type === "transcript"){
+        appendLine(msg.role, msg.text);
+        return;
+      }
+
+      if(msg.type === "transcript_clear"){
+        $("log").innerHTML = "";
+        return;
+      }
+
+      if(msg.type === "config"){
+        $("savehint").textContent = "Saved ✓ (reconnect to apply)";
+        return;
       }
     };
+  }
 
-    const sendIceCandidate = async (pc, candidate) => {
-      await fetch("/api/offer", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pc_id: pc.pc_id,
-          candidates: [{
-            candidate: candidate.candidate,
-            sdp_mid: candidate.sdpMid,
-            sdp_mline_index: candidate.sdpMLineIndex
-          }]
-        })
+  startSSE();
+
+  // -----------------------------
+  // Config save
+  // -----------------------------
+  $("save").addEventListener("click", async () => {
+    $("savehint").textContent = "Saving…";
+    const config = {
+      llm_base_url: $("llm_base_url").value,
+      llm_model: $("llm_model").value,
+      stt_base_url: $("stt_base_url").value,
+      stt_model: $("stt_model").value,
+      tts_base_url: $("tts_base_url").value,
+      tts_model: $("tts_model").value,
+      tts_voice: $("tts_voice").value,
+      system_instruction: $("system_instruction").value,
+    };
+    try{
+      const r = await fetch("/api/config", {
+        method:"PUT",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({config})
       });
+      if(!r.ok){
+        const t = await r.text();
+        $("savehint").textContent = "Save failed: " + t;
+        return;
+      }
+      $("savehint").textContent = "Saved ✓ (reconnect to apply)";
+    }catch(e){
+      $("savehint").textContent = "Save failed: " + (e?.message || e);
+    }
+  });
+
+  $("clear").addEventListener("click", async () => {
+    await fetch("/api/transcript/clear", {method:"POST"});
+  });
+
+  // -----------------------------
+  // WebRTC connect (same semantics as the working demo)
+  // -----------------------------
+  const audioEl = $("audio-el");
+  const micbar = $("micbar");
+
+  let connected = false;
+  let peerConnection = null;
+  let audioStream = null;
+
+  const sendIceCandidate = async (pc, candidate) => {
+    await fetch('/api/offer', {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pc_id: pc.pc_id,
+        candidates:[{
+          candidate: candidate.candidate,
+          sdp_mid: candidate.sdpMid,
+          sdp_mline_index: candidate.sdpMLineIndex
+        }]
+      })
+    });
+  };
+
+  const createSmallWebRTCConnection = async (audioTrack) => {
+    const config = {
+      iceServers:[ { urls:"stun:stun.l.google.com:19302" } ]
     };
+    const pc = new RTCPeerConnection(config);
 
-    // =========================
-    // Mic meter
-    // =========================
-    function startMicMeter(stream) {
-      stopMicMeter();
+    pc.pendingIceCandidates = [];
+    pc.canSendIceCandidates = false;
 
-      micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = micAudioCtx.createMediaStreamSource(stream);
-      micAnalyser = micAudioCtx.createAnalyser();
-      micAnalyser.fftSize = 1024;
-      source.connect(micAnalyser);
+    pc.ontrack = e => audioEl.srcObject = e.streams[0];
 
-      const data = new Uint8Array(micAnalyser.fftSize);
-
-      const tick = () => {
-        micAnalyser.getByteTimeDomainData(data);
-        // RMS level
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) {
-          const v = (data[i] - 128) / 128;
-          sum += v * v;
-        }
-        const rms = Math.sqrt(sum / data.length);
-        const pct = Math.min(100, Math.max(0, Math.round(rms * 140))); // tuned
-        micMeter.style.width = pct + "%";
-        micLevelText.textContent = pct + "%";
-        micRAF = requestAnimationFrame(tick);
-      };
-      tick();
-    }
-
-    function stopMicMeter() {
-      if (micRAF) cancelAnimationFrame(micRAF);
-      micRAF = null;
-      micMeter.style.width = "0%";
-      micLevelText.textContent = "0%";
-
-      try { micAnalyser?.disconnect?.(); } catch {}
-      micAnalyser = null;
-
-      if (micAudioCtx) {
-        try { micAudioCtx.close(); } catch {}
-        micAudioCtx = null;
-      }
-    }
-
-    // =========================
-    // Data channel / events
-    // =========================
-    function setupDataChannel(pc) {
-      if (!useDataChannelEl.checked) return;
-
-      // Create a channel that the server can also use to send transcript/events.
-      // If server ignores it, this is harmless.
-      dataChannel = pc.createDataChannel("events", { ordered: true });
-
-      dataChannel.onopen = () => {
-        setStatusChip(status.eventsDot, status.eventsState, "good", "DataChannel");
-        log("DataChannel open");
-        // Optional hello handshake
-        safeSendEvent({ type: "hello", ts: Date.now() });
-      };
-
-      dataChannel.onclose = () => {
-        setStatusChip(status.eventsDot, status.eventsState, "warn", "Closed");
-        log("DataChannel closed");
-      };
-
-      dataChannel.onerror = (e) => {
-        setStatusChip(status.eventsDot, status.eventsState, "bad", "Error");
-        log("DataChannel error:", e?.message || String(e));
-      };
-
-      dataChannel.onmessage = (ev) => {
-        status.lastEvent.textContent = new Date().toLocaleTimeString();
-        try {
-          const obj = JSON.parse(ev.data);
-          handleServerEvent(obj);
-        } catch {
-          // allow plain text too
-          handleServerEvent({ type: "log", text: String(ev.data) });
-        }
-      };
-    }
-
-    function safeSendEvent(obj) {
-      try {
-        if (dataChannel && dataChannel.readyState === "open") {
-          dataChannel.send(JSON.stringify(obj));
-        }
-      } catch {}
-    }
-
-    function handleServerEvent(evt) {
-      // Expected examples:
-      // {type:"user", text:"..."}  (final transcript)
-      // {type:"user_partial", text:"..."} (optional)
-      // {type:"assistant", text:"..."} (what you feed to TTS)
-      // {type:"status", llm:"ok", stt:"ok", tts:"ok"} (optional)
-      // {type:"log", text:"..."} (optional)
-      if (!evt || !evt.type) return;
-
-      if (evt.type === "user" && evt.text) {
-        appendMessage("user", evt.text);
-      } else if (evt.type === "assistant" && evt.text) {
-        appendMessage("assistant", evt.text);
-      } else if (evt.type === "log" && evt.text) {
-        log("server:", evt.text);
-      } else if (evt.type === "status") {
-        // Optional: server-driven status overrides
-        if (evt.llm) applyServiceState("llm", evt.llm);
-        if (evt.stt) applyServiceState("stt", evt.stt);
-        if (evt.tts) applyServiceState("tts", evt.tts);
-      } else {
-        // Unknown event — still log it
-        log("event:", evt);
-      }
-    }
-
-    function startSSE() {
-      if (!ENABLE_SSE) return;
-      try {
-        sse = new EventSource(SSE_URL);
-        sse.onopen = () => {
-          setStatusChip(status.eventsDot, status.eventsState, "good", "SSE");
-          log("SSE open");
-        };
-        sse.onerror = () => {
-          setStatusChip(status.eventsDot, status.eventsState, "warn", "SSE error");
-        };
-        sse.onmessage = (m) => {
-          status.lastEvent.textContent = new Date().toLocaleTimeString();
-          try { handleServerEvent(JSON.parse(m.data)); }
-          catch { handleServerEvent({ type: "log", text: String(m.data) }); }
-        };
-      } catch (e) {
-        log("SSE failed:", String(e));
-      }
-    }
-
-    function stopSSE() {
-      try { sse?.close?.(); } catch {}
-      sse = null;
-    }
-
-    // =========================
-    // WebRTC
-    // =========================
-    const addPeerConnectionEventListeners = (pc) => {
-      pc.oniceconnectionstatechange = () => {
-        log("iceConnectionState:", pc.iceConnectionState);
-        const s = pc.iceConnectionState;
-        if (s === "connected" || s === "completed") {
-          setStatusChip(status.iceDot, status.iceState, "good", `ICE: ${s}`);
-        } else if (s === "checking") {
-          setStatusChip(status.iceDot, status.iceState, "warn", `ICE: ${s}`);
-        } else if (s === "failed" || s === "disconnected" || s === "closed") {
-          setStatusChip(status.iceDot, status.iceState, "bad", `ICE: ${s}`);
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        if (pc.canSendIceCandidates && pc.pc_id) {
+          await sendIceCandidate(pc, event.candidate);
         } else {
-          setStatusChip(status.iceDot, status.iceState, null, `ICE: ${s}`);
+          pc.pendingIceCandidates.push(event.candidate);
         }
-      };
-
-      pc.onconnectionstatechange = () => {
-        log("connectionState:", pc.connectionState);
-        const s = pc.connectionState;
-        if (s === "connected") {
-          onConnected();
-        } else if (s === "disconnected" || s === "failed") {
-          onDisconnected(true);
-        } else if (s === "closed") {
-          onDisconnected(false);
-        } else if (s === "connecting") {
-          onConnecting();
-        }
-      };
-
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          log("ICE candidate:", event.candidate.type || "candidate");
-          if (pc.canSendIceCandidates && pc.pc_id) {
-            await sendIceCandidate(pc, event.candidate);
-          } else {
-            pc.pendingIceCandidates.push(event.candidate);
-          }
-        } else {
-          log("ICE gathering complete");
-        }
-      };
+      }
     };
 
-    const createSmallWebRTCConnection = async (audioTrack) => {
-      const config = {
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-      };
-
-      const pc = new RTCPeerConnection(config);
-
-      pc.pendingIceCandidates = [];
-      pc.canSendIceCandidates = false;
-
-      addPeerConnectionEventListeners(pc);
-
-      pc.ontrack = (e) => {
-        log("Remote track received");
-        audioEl.srcObject = e.streams[0];
-      };
-
-      if (useDataChannelEl.checked) {
-        setupDataChannel(pc);
-      } else {
-        setStatusChip(status.eventsDot, status.eventsState, null, "Disabled");
+    pc.onconnectionstatechange = () => {
+      const st = pc.connectionState;
+      if(st === "connected"){
+        $("connect").disabled = true;
+        $("disconnect").disabled = false;
       }
-
-      // SmallWebRTCTransport expects both transceivers
-      pc.addTransceiver(audioTrack, { direction: "sendrecv" });
-      pc.addTransceiver("video", { direction: "sendrecv" });
-
-      await pc.setLocalDescription(await pc.createOffer());
-      const offer = pc.localDescription;
-
-      const response = await fetch("/api/offer", {
-        body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-
-      const answer = await response.json();
-      pc.pc_id = answer.pc_id;
-
-      await pc.setRemoteDescription(answer);
-
-      pc.canSendIceCandidates = true;
-      for (const candidate of pc.pendingIceCandidates) {
-        await sendIceCandidate(pc, candidate);
+      if(st === "disconnected" || st === "failed" || st === "closed"){
+        disconnect();
       }
-      pc.pendingIceCandidates = [];
-
-      return pc;
     };
 
-    async function connect() {
-      onConnecting();
-      try {
-        status.micState.textContent = "Requesting…";
-        setDot(status.micDot, "warn");
+    // SmallWebRTCTransport expects both transceivers
+    pc.addTransceiver(audioTrack, { direction: 'sendrecv' });
+    pc.addTransceiver('video', { direction: 'sendrecv' });
 
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    await pc.setLocalDescription(await pc.createOffer());
+    const offer = pc.localDescription;
 
-        status.micState.textContent = "On";
-        setDot(status.micDot, "good");
+    const response = await fetch('/api/offer', {
+      body: JSON.stringify({ sdp: offer.sdp, type: offer.type}),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
 
-        startMicMeter(micStream);
+    const answer = await response.json();
+    pc.pc_id = answer.pc_id;
+    await pc.setRemoteDescription(answer);
 
-        peerConnection = await createSmallWebRTCConnection(micStream.getAudioTracks()[0]);
-        startSSE();
-
-      } catch (e) {
-        log("Connect failed:", String(e));
-        onDisconnected(false);
-        throw e;
-      }
+    pc.canSendIceCandidates = true;
+    for (const candidate of pc.pendingIceCandidates) {
+      await sendIceCandidate(pc, candidate);
     }
+    pc.pendingIceCandidates = [];
 
-    function disconnect() {
-      log("Disconnecting…");
+    return pc;
+  };
 
-      stopSSE();
+  // -----------------------------
+  // Mic level meter (normalized)
+  // -----------------------------
+  let audioCtx = null;
+  let analyser = null;
+  let raf = null;
+  let maxRms = 0.02; // initial guess
+  let maxRmsDecayAt = 0;
 
-      if (dataChannel) {
-        try { dataChannel.close(); } catch {}
+  function startMicMeter(stream){
+    stopMicMeter();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Some browsers start AudioContext in "suspended" even after a click.
+    // Best effort resume, otherwise the analyser will read zeros.
+    try{
+      if(audioCtx.state === "suspended") audioCtx.resume();
+    }catch{}
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+
+    const src = audioCtx.createMediaStreamSource(stream);
+    src.connect(analyser);
+
+    const data = new Float32Array(analyser.fftSize);
+
+    const tick = () => {
+      analyser.getFloatTimeDomainData(data);
+      let sum = 0;
+      for(let i=0;i<data.length;i++){
+        const v = data[i];
+        sum += v*v;
       }
-      dataChannel = null;
+      const rms = Math.sqrt(sum / data.length);
 
-      if (peerConnection) {
-        try { peerConnection.close(); } catch {}
+      // Update peak slowly (so "never crosses 50%" becomes meaningful)
+      const now = performance.now();
+      if(rms > maxRms){
+        maxRms = rms;
+        maxRmsDecayAt = now + 800; // hold peak a bit
+      }else if(now > maxRmsDecayAt){
+        // slow decay
+        maxRms *= 0.995;
+        if(maxRms < 0.02) maxRms = 0.02;
       }
+
+      const level = Math.min(1, rms / maxRms);
+      const pct = Math.round(level * 100);
+      micbar.style.width = pct + "%";
+
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  }
+
+  function stopMicMeter(){
+    if(raf) cancelAnimationFrame(raf);
+    raf = null;
+    if(audioCtx){
+      try{ audioCtx.close(); }catch{}
+    }
+    audioCtx = null;
+    analyser = null;
+    micbar.style.width = "0%";
+  }
+
+  async function connect(){
+    if(connected) return;
+    connected = true;
+    $("connect").disabled = true;
+    $("disconnect").disabled = false;
+
+    audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+    startMicMeter(audioStream);
+
+    peerConnection = await createSmallWebRTCConnection(audioStream.getAudioTracks()[0]);
+  }
+
+  function disconnect(){
+    if(!connected) return;
+    connected = false;
+    $("connect").disabled = false;
+    $("disconnect").disabled = true;
+
+    if(peerConnection){
+      try{ peerConnection.close(); }catch{}
       peerConnection = null;
-
-      if (micStream) {
-        try { micStream.getTracks().forEach(t => t.stop()); } catch {}
-      }
-      micStream = null;
-
-      stopMicMeter();
-
-      status.micState.textContent = "Idle";
-      setDot(status.micDot, null);
-
-      onDisconnected(false);
     }
-
-    function onConnecting() {
-      setStatusChip(status.webrtcDot, status.webrtcState, "warn", "Connecting");
-      connected = true;
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
+    if(audioStream){
+      audioStream.getTracks().forEach(t => { try{ t.stop(); }catch{} });
+      audioStream = null;
     }
+    stopMicMeter();
+  }
 
-    function onConnected() {
-      printSelectedIceCandidate(peerConnection);
-      setStatusChip(status.webrtcDot, status.webrtcState, "good", "Connected");
-      connected = true;
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
-
-      // Mark events as waiting if enabled but not open yet
-      if (useDataChannelEl.checked && (!dataChannel || dataChannel.readyState !== "open")) {
-        setStatusChip(status.eventsDot, status.eventsState, "warn", "Waiting…");
-      }
-    }
-
-    function onDisconnected(maybeReconnect) {
-      setStatusChip(status.webrtcDot, status.webrtcState, "bad", "Disconnected");
-      connected = false;
-      connectBtn.disabled = false;
-      disconnectBtn.disabled = true;
-
-      if (maybeReconnect && autoReconnectEl.checked) {
-        log("Auto-reconnect scheduled…");
-        setTimeout(async () => {
-          if (connected) return;
-          try { await connect(); }
-          catch (e) { log("Auto-reconnect failed:", String(e)); }
-        }, 1200);
-      }
-    }
-
-    // =========================
-    // Health polling
-    // =========================
-    function applyServiceState(which, state) {
-      // state: "ok" | "warn" | "bad" | "unknown" | any string
-      const map = {
-        ok:   { dot: "good", text: "OK" },
-        warn: { dot: "warn", text: "Degraded" },
-        bad:  { dot: "bad",  text: "Down" },
-        unknown: { dot: null, text: "Unknown" }
-      };
-      const m = map[state] || null;
-
-      if (which === "llm") {
-        setStatusChip(status.llmDot, status.llmStatus, m ? m.dot : null, m ? m.text : String(state));
-      } else if (which === "stt") {
-        setStatusChip(status.sttDot, status.sttStatus, m ? m.dot : null, m ? m.text : String(state));
-      } else if (which === "tts") {
-        setStatusChip(status.ttsDot, status.ttsStatus, m ? m.dot : null, m ? m.text : String(state));
-      }
-    }
-
-    async function probeService(which) {
-      const probes = HEALTH_CHECKS[which] || [];
-      for (const fn of probes) {
-        try {
-          await fn();
-          return { ok: true };
-        } catch (e) {
-          // keep trying
-        }
-      }
-      return { ok: false };
-    }
-
-    async function pollHealth() {
-      setStatusChip(status.healthDot, status.healthState, "warn", "Polling…");
-
-      const results = await Promise.allSettled([
-        probeService("llm"),
-        probeService("stt"),
-        probeService("tts"),
-      ]);
-
-      const mapped = results.map(r => (r.status === "fulfilled" ? r.value : { ok:false, err:r.reason }));
-
-      // If the probe failed, we still want to distinguish CORS vs truly down.
-      // We'll do a single "best effort" fetch per service to classify error message.
-      async function classify(which, urlForMsg) {
-        try {
-          await fetch(urlForMsg, { method: "GET" });
-          // If it succeeds but probes failed, mark warn
-          return { state: "warn", note: "Unexpected" };
-        } catch (e) {
-          const msg = classifyFetchError(e);
-          if (msg === "CORS/blocked") return { state: "warn", note: "CORS" };
-          return { state: "bad", note: msg };
-        }
-      }
-
-      // LLM
-      if (mapped[0].ok) applyServiceState("llm", "ok");
-      else {
-        const c = await classify("llm", `${LLM_BASE}/models`);
-        applyServiceState("llm", c.note === "CORS" ? "warn" : "bad");
-        status.llmStatus.textContent = c.note === "CORS" ? "CORS/blocked" : "Down";
-      }
-
-      // STT
-      if (mapped[1].ok) applyServiceState("stt", "ok");
-      else {
-        const c = await classify("stt", `${STT_BASE}/models`);
-        applyServiceState("stt", c.note === "CORS" ? "warn" : "bad");
-        status.sttStatus.textContent = c.note === "CORS" ? "CORS/blocked" : "Down";
-      }
-
-      // TTS
-      if (mapped[2].ok) applyServiceState("tts", "ok");
-      else {
-        const c = await classify("tts", `${TTS_BASE}/models`);
-        applyServiceState("tts", c.note === "CORS" ? "warn" : "bad");
-        status.ttsStatus.textContent = c.note === "CORS" ? "CORS/blocked" : "Down";
-      }
-
-      const anyBad = [status.llmDot, status.sttDot, status.ttsDot].some(d => d.classList.contains("bad"));
-      const allGood = [status.llmDot, status.sttDot, status.ttsDot].every(d => d.classList.contains("good"));
-
-      if (allGood) setStatusChip(status.healthDot, status.healthState, "good", "Healthy");
-      else if (anyBad) setStatusChip(status.healthDot, status.healthState, "bad", "Issues");
-      else setStatusChip(status.healthDot, status.healthState, "warn", "Partial");
-    }
-
-    // =========================
-    // UI wiring
-    // =========================
-    connectBtn.addEventListener("click", async () => {
-      try { await connect(); }
-      catch {}
-    });
-
-    disconnectBtn.addEventListener("click", () => disconnect());
-
-    clearChatBtn.addEventListener("click", () => {
-      chatEl.innerHTML = "";
-      status.lastEvent.textContent = "—";
-    });
-
-    // Initial state
-    setStatusChip(status.webrtcDot, status.webrtcState, null, "Disconnected");
-    setStatusChip(status.iceDot, status.iceState, null, "ICE: —");
-    setStatusChip(status.eventsDot, status.eventsState, null, "Idle");
-    applyServiceState("llm", "unknown");
-    applyServiceState("stt", "unknown");
-    applyServiceState("tts", "unknown");
-
-    // Health loop
-    pollHealth();
-    setInterval(pollHealth, HEALTH_INTERVAL_MS);
-  </script>
+  $("connect").addEventListener("click", connect);
+  $("disconnect").addEventListener("click", disconnect);
+</script>
 </body>
 </html>
