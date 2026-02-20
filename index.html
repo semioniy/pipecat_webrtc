@@ -676,7 +676,10 @@
       if (type.includes("stt") || type.includes("transcription") || type.includes("transcript")) {
         const isPartial = type.includes("partial") || type.includes("interim");
         const isFinal = eventBool(evt, ["final"], ["is_final"], ["data", "final"], ["data", "is_final"]);
-        if (isPartial || isFinal === false) return null;
+        // Only accept STT text if it is explicitly final.
+        // (Some backends send transcript-ish events without a final flag; those were being
+        // incorrectly rendered as user messages and caused duplicates.)
+        if (isPartial || isFinal !== true) return null;
         return "user";
       }
 
