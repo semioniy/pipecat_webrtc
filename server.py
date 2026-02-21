@@ -92,7 +92,7 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
 
 @app.patch("/api/offer")
 async def ice_candidate(request: SmallWebRTCPatchRequest):
-    logger.debug(f"Received patch request: {request}")
+    logger.trace(f"Received patch request: {request}")
     await small_webrtc_handler.handle_patch_request(request)
     return {"status": "success"}
 
@@ -121,8 +121,8 @@ if __name__ == "__main__":
 
     logger.remove(0)
     if args.verbose:
-        logger.add(sys.stderr, level="TRACE")
-    else:
         logger.add(sys.stderr, level="DEBUG")
+    else:
+        logger.add(sys.stderr, level="INFO")
 
     uvicorn.run(app, host=args.host, port=args.port)

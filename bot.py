@@ -51,6 +51,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     TTSAudioRawFrame,
+    TranscriptionFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -98,6 +99,7 @@ ACCEPT_MESSAGE_TYPE = clean_env_str("ACCEPT_MESSAGE_TYPE", "bot-llm-text")
 
 # Greet on connect by forcing a first LLM run (recommended for a nice UX)
 GREET_ON_CONNECT = clean_env_str("GREET_ON_CONNECT", "1") not in ("0", "false", "False")
+ENABLE_REPETITIVE_STT_FILTER = clean_env_str("ENABLE_REPETITIVE_STT_FILTER", "0") in ("1", "true", "True")
 
 
 def wav_to_pcm16(wav_bytes: bytes) -> tuple[bytes, int, int]:
@@ -178,6 +180,35 @@ class _BufState:
     last_flush_ms: int = 0
 
 
+class RepetitiveTranscriptionFilter(FrameProcessor):
+    """Drops obviously repetitive finalized transcripts (usually echo/noise feedback)."""
+
+    def _check_started(self, frame: Frame) -> bool:
+        return True
+
+    def _is_repetitive(self, text: str) -> bool:
+        sentences = [s.strip().lower() for s in re.split(r"[.!?]+", text) if s.strip()]
+        if len(sentences) < 4:
+            return False
+
+        counts: dict[str, int] = {}
+        for sentence in sentences:
+            counts[sentence] = counts.get(sentence, 0) + 1
+
+        repeated_sentence = max(counts, key=counts.get)
+        repeated_count = counts[repeated_sentence]
+        ratio = repeated_count / len(sentences)
+
+        return repeated_count >= 4 and ratio >= 0.7 and len(repeated_sentence.split()) <= 6
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, TranscriptionFrame) and frame.finalized and self._is_repetitive(frame.text):
+            logger.warning(f"[STT-FILTER] dropped repetitive transcript: {frame.text[:120]!r}")
+            return
+
+        await self.push_frame(frame, direction)
+
+
 class TextBufferAndChunker(FrameProcessor):
     """
     Buffers token fragments into readable chunks and emits them as:
@@ -228,6 +259,18 @@ class TextBufferAndChunker(FrameProcessor):
             return False
         return bool(re.search(r"([.!?]\s|[.!?]$|\n)", s))
 
+    def _find_last_sentence_break(self, s: str, max_pos: Optional[int] = None) -> int:
+        """Return index after the last sentence boundary, or -1 if none found."""
+        if max_pos is None:
+            max_pos = len(s)
+        max_pos = max(0, min(max_pos, len(s)))
+
+        # Prefer punctuation that naturally closes a sentence.
+        matches = list(re.finditer(r"[.!?](?:\s+|$)|\n", s[:max_pos]))
+        if not matches:
+            return -1
+        return matches[-1].end()
+
     def _normalize_chunk(self, s: str) -> str:
         # collapse spaces around hyphens produced by tokenization
         s = re.sub(r"\s*-\s*", "-", s)
@@ -260,9 +303,11 @@ class TextBufferAndChunker(FrameProcessor):
 
         # split into max-sized chunks
         while len(text) > TTS_MAX_CHARS:
-            cut = text.rfind(". ", 0, TTS_MAX_CHARS)
+            cut = self._find_last_sentence_break(text, TTS_MAX_CHARS)
             if cut == -1:
                 cut = text.rfind(" ", 0, TTS_MAX_CHARS)
+            else:
+                cut -= 1
             if cut == -1:
                 cut = TTS_MAX_CHARS
             chunk = text[: cut + 1]
@@ -288,6 +333,15 @@ class TextBufferAndChunker(FrameProcessor):
         if frag is not None:
             self._st.buf = self._append(self._st.buf, frag)
             self._st.last_update_ms = now
+
+            # If we already have one complete sentence and additional text is arriving,
+            # flush at the sentence boundary even before TTS_MIN_CHARS.
+            sentence_break = self._find_last_sentence_break(self._st.buf)
+            if sentence_break != -1 and sentence_break < len(self._st.buf):
+                chunk = self._st.buf[:sentence_break]
+                self._st.buf = self._st.buf[sentence_break:].lstrip()
+                await self._emit_chunk(direction, chunk, "punct+carry")
+                self._st.last_flush_ms = now
 
             # flush on punctuation once buffer is “sentence-like”
             if len(self._st.buf) >= TTS_MIN_CHARS and self._should_flush_on_punct(self._st.buf):
@@ -332,7 +386,6 @@ class AssistantContextWriter(FrameProcessor):
             return
 
         self._context.add_message({"role": "assistant", "content": text.strip()})
-        logger.debug(f"[CTX] appended assistant message chars={len(text.strip())}")
 
 
 class ChatterboxTTSProcessor(FrameProcessor):
@@ -367,8 +420,6 @@ class ChatterboxTTSProcessor(FrameProcessor):
         if not text:
             return
 
-        logger.info(f"[TTS] chars={len(text)} preview={text[:140]!r}")
-
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -388,30 +439,6 @@ class ChatterboxTTSProcessor(FrameProcessor):
             await self._client.aclose()
         finally:
             await super().cleanup()
-
-
-class AfterLLMSpy(FrameProcessor):
-    """Prints only accepted stream fragments so you can verify dedupe is working."""
-    def __init__(self, max_logs: int = 200):
-        super().__init__()
-        self._n = 0
-        self._max = max_logs
-
-    def _check_started(self, frame: Frame) -> bool:
-        return True
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await self.push_frame(frame, direction)
-
-        if self._n >= self._max:
-            return
-
-        if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            msg = getattr(frame, "message", None)
-            frag, fin, mtype = extract_llm_text_fragment(msg)
-            if frag is not None:
-                self._n += 1
-                logger.debug(f"[SPY] frag={frag!r} final={fin} type={mtype}")
 
 
 async def run_bot(webrtc_connection):
@@ -444,7 +471,7 @@ async def run_bot(webrtc_connection):
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
-    spy = AfterLLMSpy(max_logs=250)
+    transcript_filter = RepetitiveTranscriptionFilter() if ENABLE_REPETITIVE_STT_FILTER else None
     buffer = TextBufferAndChunker()
     ctx_writer = AssistantContextWriter(context)
 
@@ -455,22 +482,26 @@ async def run_bot(webrtc_connection):
         voice=clean_env_str("TTS_VOICE", "Frieren.wav"),
     )
 
-    pipeline = Pipeline(
+    pipeline_steps = [
+        transport.input(),
+        stt,
+    ]
+    if transcript_filter is not None:
+        pipeline_steps.append(transcript_filter)
+
+    pipeline_steps.extend(
         [
-            transport.input(),
-            stt,
             user_agg,
             llm,
-
-            spy,          # show accepted LLM fragments
             buffer,       # buffer + chunk -> emits assistant.tts_text messages
             ctx_writer,   # write chunks into LLMContext so history progresses
             tts,
-
             transport.output(),
             assistant_agg,
         ]
     )
+
+    pipeline = Pipeline(pipeline_steps)
 
     task = PipelineTask(
         pipeline,
@@ -480,6 +511,8 @@ async def run_bot(webrtc_connection):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client):
         logger.info("Pipecat client connected")
+        logger.info("=== SESSION READY: startup logs complete; runtime logs begin ===")
+        logger.info(f"Repetitive STT filter enabled: {ENABLE_REPETITIVE_STT_FILTER}")
         if GREET_ON_CONNECT:
             # One-time kickoff. If you don't want an automatic greeting, set GREET_ON_CONNECT=0.
             await task.queue_frames([LLMRunFrame()])
